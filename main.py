@@ -12,7 +12,7 @@ def demo(csv_path: str):
     prices = load_prices_from_csv(csv_path)
 
     distance = DistanceSelector()
-    corr = CorrelationSelector(select_pairs_per_window=5, min_corr=0.1)
+    corr = CorrelationSelector()
     coint = CointegrationSelector(select_pairs_per_window=5, adf_crit=-3.4, use_log_price=True)
     sdr = SDRSelector(select_pairs_per_window=5, market_mode="mean")
     ga = GASelector(pairs_per_chrom=5, pop=80, gen=60, candidate_source="distance", use_log_price=False)

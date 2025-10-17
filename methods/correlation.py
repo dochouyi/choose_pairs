@@ -8,9 +8,8 @@ from metrics import corr_returns, estimate_beta_ols
 
 class CorrelationSelector:
     def __init__(self, **kwargs):
-        self.select_pairs_per_window: int = 1
-        self.max_candidates: int = 20
-        self.min_form_bars: int = 60
+        self.select_pairs_per_window: int = 3
+        self.max_candidates: int = 5
         self.min_corr: float = 0.2
         self.use_log_price: bool = False
         self.bb_window_for_beta: int = 30
@@ -30,8 +29,7 @@ class CorrelationSelector:
         out: List[Pair] = []
         for a, b, c in scores[: self.max_candidates]:
             a_s, b_s = prices[a], prices[b]
-            if len(a_s) < max(self.min_form_bars, 30):
-                continue
+
             if not np.isfinite(c) or c < self.min_corr:
                 continue
             beta = estimate_beta_ols(a_s, b_s, use_log_price=self.use_log_price)
