@@ -3,8 +3,8 @@ import pandas as pd
 from metrics import unified_scaled_distance, estimate_beta_ols
 from metrics import pct_change_series, adf_test_simple
 import numpy as np, random
-from metrics import bollinger_spread_score
-from .sdr import _market_series, sdr_gamma_diff
+from metrics import bollinger_spread_score,market_series, sdr_gamma_diff
+
 
 Pair = Tuple[str, str, float]
 
@@ -47,7 +47,7 @@ class GASelector:
                 beta = estimate_beta_ols(a_s, b_s, use_log_price=self.use_log_price)
                 pool.append((a, b, beta))
         else:
-            market_r = _market_series(prices, "symbol", "BTC/USDT:USDT")
+            market_r = market_series(prices, "symbol", "BTC/USDT:USDT")
             raw = []
             for i in range(len(keys)):
                 for j in range(i + 1, len(keys)):

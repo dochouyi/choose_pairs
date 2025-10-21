@@ -2,45 +2,11 @@ from typing import Optional
 from metrics import pct_change_series, adf_test_simple
 from typing import Dict, List, Tuple, Set
 import pandas as pd
-from metrics import  pearson_returns_correlation, estimate_beta_ols
+from metrics import  pearson_returns_correlation, estimate_beta_ols, market_series, sdr_gamma_diff
 import numpy as np
 
 Pair = Tuple[str, str, float]
 
-#mode：市场参考模式。mean 表示所有资产价格的均值，symbol 表示用指定资产作为市场参考。
-#生成市场参考收益率序列。
-def _market_series(prices: Dict[str, pd.Series], mode: str, symbol: Optional[str]) -> pd.Series:
-    dfs = pd.concat(prices.values(), axis=1, join="inner")
-    dfs.columns = list(prices.keys())
-    if mode == "symbol" and symbol is not None and symbol in prices:
-        base = prices[symbol]
-        return pct_change_series(base)
-    else:
-        px_mean = dfs.mean(axis=1)
-        return pct_change_series(px_mean)
-
-
-# 计算两个资产对在市场参考下的“gamma差”。计算两个资产对市场参考收益率的“gamma差”。
-# 这里的 gamma 实际上就是 OLS（最小二乘法）回归得到的 beta 系数，表示资产对市场的敏感度。最终返回的是两个资产对市场敏感度的差值。
-def sdr_gamma_diff(a: pd.Series, b: pd.Series, market_r: pd.Series) -> float:
-    ra, rb = pct_change_series(a), pct_change_series(b)
-
-    ri_a = ra.values
-    ri_b = rb.values
-    rm = market_r.values
-    vx = rm - rm.mean()   #对市场参考收益率序列做中心化（减去均值），让回归更稳健。
-    def ols_beta(y, x_centered):
-        vy = y - y.mean()
-        denom = (x_centered**2).sum()
-        if denom <= 0:
-            return 0.0
-        return float((x_centered * vy).sum() / denom)
-
-    #分别对 a、b 的收益率序列和市场参考收益率做回归，得到各自的 beta（敏感度）。
-    gamma_a = ols_beta(ri_a, vx)
-    gamma_b = ols_beta(ri_b, vx)
-    #返回两个资产对市场敏感度的差值。
-    return float(gamma_a - gamma_b)
 
 
 class SDRSelector:
@@ -49,11 +15,11 @@ class SDRSelector:
         self.min_corr: float = 0.2  #皮尔逊相关系数的筛选阈值
         self.use_log_price: bool = True     #计算beta的时候是否使用log尺度
 
-        self.market_mode: str = "symbol"  # "mean" 或 "symbol"
+        self.market_mode: str = "mean"  # "mean" 或 "symbol"
         self.market_symbol: Optional[str] = "BTC/USDT:USDT"
 
     def select_pairs(self, prices: Dict[str, pd.Series]) -> List[Pair]:
-        market_r = _market_series(prices, self.market_mode, self.market_symbol)
+        market_r = market_series(prices, self.market_mode, self.market_symbol)
         keys = list(prices.keys())
         scored: List[Pair] = []
         for i in range(len(keys)):

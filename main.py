@@ -19,12 +19,12 @@ def demo(csv_path: str):
     nsga = NSGA2Selector(pairs_per_chrom=5, pop=80, gen=60, use_log_price=False)
 
     methods = {
-        # "Distance": distance,
-        # "Correlation": corr,
-        # "Cointegration": coint,
-        # "SDR": sdr,
-        "GA": ga,
-        "NSGA-II": nsga,
+        "Distance": distance,
+        "Correlation": corr,
+        "Cointegration": coint,
+        "SDR": sdr,
+        # "GA": ga,
+        # "NSGA-II": nsga,
     }
 
     results: Dict[str, list] = {}

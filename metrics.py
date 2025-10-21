@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import math
 from typing import Tuple
+from typing import Dict, List, Tuple, Set
+from typing import Optional
 
 def pct_change_series(s: pd.Series) -> pd.Series:
     return s.pct_change().dropna()
@@ -114,6 +116,43 @@ def engle_granger_beta(a: pd.Series, b: pd.Series, use_log_price=True) -> Tuple[
     alpha, beta = beta_hat[0], beta_hat[1]
     resid = y - (alpha + beta * x)
     return float(np.clip(beta, 0.1, 10.0)), pd.Series(resid, index=a.index)
+
+
+#mode：市场参考模式。mean 表示所有资产价格的均值，symbol 表示用指定资产作为市场参考。
+#生成市场参考收益率序列。
+def market_series(prices: Dict[str, pd.Series], mode: str, symbol: Optional[str]) -> pd.Series:
+    dfs = pd.concat(prices.values(), axis=1, join="inner")
+    dfs.columns = list(prices.keys())
+    if mode == "symbol" and symbol is not None and symbol in prices:
+        base = prices[symbol]
+        return pct_change_series(base)
+    else:
+        px_mean = dfs.mean(axis=1)
+        return pct_change_series(px_mean)
+
+
+# 计算两个资产对在市场参考下的“gamma差”。计算两个资产对市场参考收益率的“gamma差”。
+# 这里的 gamma 实际上就是 OLS（最小二乘法）回归得到的 beta 系数，表示资产对市场的敏感度。最终返回的是两个资产对市场敏感度的差值。
+def sdr_gamma_diff(a: pd.Series, b: pd.Series, market_r: pd.Series) -> float:
+    ra, rb = pct_change_series(a), pct_change_series(b)
+
+    ri_a = ra.values
+    ri_b = rb.values
+    rm = market_r.values
+    vx = rm - rm.mean()   #对市场参考收益率序列做中心化（减去均值），让回归更稳健。
+    def ols_beta(y, x_centered):
+        vy = y - y.mean()
+        denom = (x_centered**2).sum()
+        if denom <= 0:
+            return 0.0
+        return float((x_centered * vy).sum() / denom)
+
+    #分别对 a、b 的收益率序列和市场参考收益率做回归，得到各自的 beta（敏感度）。
+    gamma_a = ols_beta(ri_a, vx)
+    gamma_b = ols_beta(ri_b, vx)
+    #返回两个资产对市场敏感度的差值。
+    return float(gamma_a - gamma_b)
+
 
 
 # 这个函数用于评估一对资产（a, b）在某个beta配对下的布林带套利表现，输出两个指标：
