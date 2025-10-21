@@ -1,7 +1,12 @@
-from dataclasses import dataclass
 from typing import Dict, List, Tuple, Set
 import pandas as pd
-from base import Pair
+from metrics import unified_scaled_distance, estimate_beta_ols
+from metrics import pct_change_series, adf_test_simple
+import numpy as np, random
+from metrics import bollinger_spread_score
+from .sdr import _market_series, sdr_gamma_diff
+
+Pair = Tuple[str, str, float]
 
 class GASelector:
     def __init__(self, **kwargs):
@@ -11,9 +16,7 @@ class GASelector:
         self.cxp: float = 0.8
         self.mutp: float = 0.2
         self.candidate_cap: int = 200
-        self.min_form_bars: int = 60
         self.use_log_price: bool = False
-        self.bb_window_for_beta: int = 30
         # 评分参数
         self.bb_window: int = 30
         self.takeprofit_z: float = 2.0
@@ -21,13 +24,11 @@ class GASelector:
         self.fee_bps: float = 0.0
         self.seed: int = 42
         # 候选来源
-        self.candidate_source: str = "distance"  # "distance" 或 "sdr"
+        self.candidate_source: str = "sdr"  # "distance" 或 "sdr"
 
+        random.seed(self.seed)
+        np.random.seed(self.seed)
     def _build_candidates(self, prices: Dict[str, pd.Series]) -> List[Pair]:
-        import numpy as np, random
-        from metrics import unified_scaled_distance, estimate_beta_ols
-        from metrics import series_returns, adf_test_simple
-
         keys = list(prices.keys())
         pool = []
         if self.candidate_source == "distance":
@@ -42,52 +43,35 @@ class GASelector:
             raw = raw[:self.candidate_cap]
             for a, b, _ in raw:
                 a_s, b_s = prices[a], prices[b]
-                if len(a_s) < max(self.min_form_bars, 30):
-                    continue
+
                 beta = estimate_beta_ols(a_s, b_s, use_log_price=self.use_log_price)
                 pool.append((a, b, beta))
         else:
-            from .sdr import _market_series, sdr_gamma_diff
-            market_r = _market_series(prices, "mean", None)
+            market_r = _market_series(prices, "symbol", "BTC/USDT:USDT")
             raw = []
             for i in range(len(keys)):
                 for j in range(i + 1, len(keys)):
                     a, b = keys[i], keys[j]
                     a_s, b_s = prices[a], prices[b]
-                    if len(a_s) < max(self.min_form_bars, 30):
-                        continue
-                    ra, rb = series_returns(a_s), series_returns(b_s)
+                    ra, rb = pct_change_series(a_s), pct_change_series(b_s)
 
-                    if len(ra.index) < 30:
-                        continue
                     gamma = sdr_gamma_diff(a_s, b_s, market_r)
                     gt = ra.values - rb.values - gamma * market_r.values
                     t_stat = adf_test_simple(gt, lags=1)
                     if np.isfinite(t_stat):
-                        raw.append((a, b, -t_stat))
-            raw.sort(key=lambda x: -x[2])
+                        raw.append((a, b, t_stat))
+            raw.sort(key=lambda x: x[2])    #按照从小到大排列
             raw = raw[:self.candidate_cap]
             for a, b, _ in raw:
                 a_s, b_s = prices[a], prices[b]
-                if len(a_s) < max(self.min_form_bars, 30):
-                    continue
                 beta = estimate_beta_ols(a_s, b_s, use_log_price=self.use_log_price)
                 pool.append((a, b, beta))
         return pool
 
     def select_pairs(self, prices: Dict[str, pd.Series]) -> List[Pair]:
-        import numpy as np, random
-        from metrics import bollinger_spread_score
 
-        random.seed(self.seed); np.random.seed(self.seed)
         candidates = self._build_candidates(prices)
         # 验证样本
-        valid = []
-        for a, b, beta in candidates:
-            a_s, b_s = prices[a], prices[b]
-            if len(a_s) >= max(self.min_form_bars, 30):
-                valid.append((a, b, beta))
-        candidates = valid
         if not candidates:
             return []
 
@@ -95,7 +79,8 @@ class GASelector:
 
         def random_chrom():
             used = set(); chrom = []
-            idxs = list(range(len(candidates))); random.shuffle(idxs)
+            idxs = list(range(len(candidates)))
+            random.shuffle(idxs)
             for idx in idxs:
                 a, b, beta = candidates[idx]
                 if (a not in used) and (b not in used):
@@ -112,7 +97,7 @@ class GASelector:
                 s1, _ = bollinger_spread_score(
                     np.log(a_s) if self.use_log_price else a_s,
                     np.log(b_s) if self.use_log_price else b_s,
-                    beta, self.bb_window, self.takeprofit_z, self.close_to_sma, self.fee_bps
+                    beta, self.bb_window, self.takeprofit_z, self.fee_bps
                 )
                 if not np.isfinite(s1): s1 = -1e6
                 score_sum += s1
@@ -178,9 +163,7 @@ class GASelector:
         best_idx = max(range(len(pop)), key=lambda i: fit[i])
         best = pop[best_idx]
         out = []
-
         for idx in best:
             a, b, beta = candidates[idx]
-
             out.append((a, b, beta))
         return out

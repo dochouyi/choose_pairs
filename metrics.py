@@ -3,13 +3,20 @@ import pandas as pd
 import math
 from typing import Tuple
 
-def series_returns(s: pd.Series) -> pd.Series:
+def pct_change_series(s: pd.Series) -> pd.Series:
     return s.pct_change().dropna()
 
-def corr_returns(a: pd.Series, b: pd.Series) -> float:
-    ra, rb = series_returns(a), series_returns(b)
+# 皮尔逊相关系数，值越接近 1，说明涨跌同步性越强；越接近 -1，说明走势相反；接近 0，则相关性弱。
+def pearson_returns_correlation(a: pd.Series, b: pd.Series) -> float:
+    ra, rb = pct_change_series(a), pct_change_series(b)
     return float(ra.corr(rb))
 
+
+# 用于计算 OLS（普通最小二乘法）回归的 Beta 系数，
+# a: 目标资产的价格（或收益）
+# b: 基准资产的价格（或收益）
+# use_log_price: 是否对价格取对数，默认为 True
+# Beta 是衡量a相对于b的波动性的指标，Beta = 1.5 表示，当b上涨1%，a上涨1.5%
 def estimate_beta_ols(a: pd.Series, b: pd.Series, use_log_price=True) -> float:
     # 取对数或原值
     a = np.log(a) if use_log_price else a.copy()
@@ -22,17 +29,20 @@ def estimate_beta_ols(a: pd.Series, b: pd.Series, use_log_price=True) -> float:
     if x.size < 2:
         return 1.0
 
+    # 标准化数据（中心化）
     vx = x - x.mean()
     vy = y - y.mean()
-    denom = (vx**2).sum()
+    denom = (vx**2).sum()   #计算分母
     if denom <= 0:
         return 1.0
-    beta = (vx * vy).sum() / denom
+
+    beta = (vx * vy).sum() / denom  #计算beta值
     if not np.isfinite(beta):
         beta = 1.0
-    return float(np.clip(beta, 0.1, 10.0))
+    return float(np.clip(beta, 0.1, 10.0))  #   防止极端值
 
 
+#度量两个序列的相似性，消除了量纲和尺度的影响
 def unified_scaled_distance(a: pd.Series, b: pd.Series) -> float:
 
     A = a.values.reshape(-1, 1)
@@ -40,10 +50,18 @@ def unified_scaled_distance(a: pd.Series, b: pd.Series) -> float:
     X = np.vstack([A, B])
     mu = X.mean()
     sd = X.std() if X.std() > 0 else 1.0
+
+    #对 A 和 B 都用同一个均值和标准差做标准化
     As = (A - mu) / sd
     Bs = (B - mu) / sd
 
-    return float(np.linalg.norm(As.flatten() - Bs.flatten()))
+    return float(np.linalg.norm(As.flatten() - Bs.flatten()))   # 计算L2范数
+
+
+# ADF（Augmented Dickey-Fuller）单位根检验的核心部分，用于判断一个时间序列是否平稳
+# 输入：一组时间序列数据 x，以及滞后阶数 lags。
+# 输出：该序列的ADF检验t统计量（float类型），用于后续判断序列是否平稳。
+# 输出的数值越小（越负），越倾向于拒绝单位根假设，即序列更可能是平稳的。
 
 def adf_test_simple(x: np.ndarray, lags: int = 1) -> float:
     x = x.astype(float)
@@ -71,8 +89,14 @@ def adf_test_simple(x: np.ndarray, lags: int = 1) -> float:
     phi = beta_hat[1]
     se_phi = math.sqrt(var_beta[1, 1]) if var_beta[1, 1] > 0 else np.inf
     t_phi = phi / se_phi if se_phi > 0 else np.nan
-    return float(t_phi)
+    return float(t_phi) #返回ADF检验的t统计量（不是p值）
 
+
+# Engle-Granger 协整回归，如果 a、b 是两个资产的价格序列，beta 反映了它们长期均衡关系的比例
+# 用最小二乘法对两个时间序列做线性回归（通常用于协整检验中的 Engle-Granger 方法）。
+# 返回回归斜率 beta（代表协整关系的强度），以及残差序列。
+# 支持对数变换，并对异常情况做了容错处理（数据太少、矩阵不可逆等）。
+# 残差序列反映了 a 和 b 在协整关系下的“偏离程度”。如果两者协整，残差应该是均值回归的、平稳的。
 def engle_granger_beta(a: pd.Series, b: pd.Series, use_log_price=True) -> Tuple[float, pd.Series]:
 
     a = np.log(a) if use_log_price else a.copy()
@@ -91,11 +115,12 @@ def engle_granger_beta(a: pd.Series, b: pd.Series, use_log_price=True) -> Tuple[
     resid = y - (alpha + beta * x)
     return float(np.clip(beta, 0.1, 10.0)), pd.Series(resid, index=a.index)
 
+
+# 这个函数用于评估一对资产（a, b）在某个beta配对下的布林带套利表现，输出两个指标：
+# score：标准化后的累计收益（pnl/标准差均值）；maxdd_n：标准化后的最大回撤
+
 def bollinger_spread_score(a: pd.Series, b: pd.Series, beta: float, window: int, take_z: float,
-                           close_to_sma: bool, fee_bps: float) -> Tuple[float, float]:
-    a, b = a, b
-    if len(a.index) < window + 10:
-        return -np.inf, np.inf
+                            fee_bps: float) -> Tuple[float, float]:
     A = a.values
     B = b.values
     S = A - beta * B
@@ -104,24 +129,25 @@ def bollinger_spread_score(a: pd.Series, b: pd.Series, beta: float, window: int,
     up = sma + take_z * std
     dn = sma - take_z * std
 
-    pnl = 0.0
-    peak = 0.0
-    maxdd = 0.0
-    pos = 0
-    entry = 0.0
-    fee = fee_bps / 10000.0
+    pnl = 0.0   #资金
+    peak = 0.0  #曾获得的最大未平仓利润值
+    maxdd = 0.0    #最大回撤
+
+    pos = 0     #持仓pos
+    entry = 0.0     #入场价格
+    fee = fee_bps / 10000.0 #手续费
 
     for t in range(window, len(S)):
         s = S[t]; mu = sma[t]; u = up[t]; d = dn[t]
         if np.isnan(mu) or np.isnan(u) or np.isnan(d):
             continue
         if pos == 0:
-            if s > u:
+            if s > u:   #上轨的情况
                 pos = -1; entry = s; pnl -= abs(s) * fee
-            elif s < d:
+            elif s < d:    #下轨的情况
                 pos = 1; entry = s; pnl -= abs(s) * fee
         else:
-            close_cond = (abs(s - mu) < 1e-12) if close_to_sma else (d < s < u)
+            close_cond = abs(s - mu) < 1e-12
             if close_cond:
                 pnl += (s - entry) * pos
                 pnl -= abs(s) * fee

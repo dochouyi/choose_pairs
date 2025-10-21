@@ -13,16 +13,16 @@ def demo(csv_path: str):
 
     distance = DistanceSelector()
     corr = CorrelationSelector()
-    coint = CointegrationSelector(select_pairs_per_window=5, adf_crit=-3.4, use_log_price=True)
-    sdr = SDRSelector(select_pairs_per_window=5, market_mode="mean")
+    coint = CointegrationSelector()
+    sdr = SDRSelector()
     ga = GASelector(pairs_per_chrom=5, pop=80, gen=60, candidate_source="distance", use_log_price=False)
     nsga = NSGA2Selector(pairs_per_chrom=5, pop=80, gen=60, use_log_price=False)
 
     methods = {
-        "Distance": distance,
-        "Correlation": corr,
-        "Cointegration": coint,
-        "SDR": sdr,
+        # "Distance": distance,
+        # "Correlation": corr,
+        # "Cointegration": coint,
+        # "SDR": sdr,
         "GA": ga,
         "NSGA-II": nsga,
     }

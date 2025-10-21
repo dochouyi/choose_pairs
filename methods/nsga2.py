@@ -1,7 +1,10 @@
-from dataclasses import dataclass
 from typing import Dict, List, Tuple, Set
 import pandas as pd
-from base import Pair
+import numpy as np, random
+from metrics import unified_scaled_distance, estimate_beta_ols, bollinger_spread_score
+
+
+Pair = Tuple[str, str, float]
 
 class NSGA2Selector:
     def __init__(self, **kwargs):
@@ -9,9 +12,7 @@ class NSGA2Selector:
         self.pop: int = 80
         self.gen: int = 60
         self.candidate_cap: int = 200
-        self.min_form_bars: int = 60
         self.use_log_price: bool = False
-        self.bb_window_for_beta: int = 30
         # 评分参数
         self.bb_window: int = 30
         self.takeprofit_z: float = 2.0
@@ -19,12 +20,10 @@ class NSGA2Selector:
         self.fee_bps: float = 0.0
         self.seed: int = 42
 
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+
     def select_pairs(self, prices: Dict[str, pd.Series]) -> List[Pair]:
-        import numpy as np, random
-        from metrics import unified_scaled_distance, estimate_beta_ols, bollinger_spread_score
-
-        random.seed(self.seed); np.random.seed(self.seed)
-
         keys = list(prices.keys())
         raw = []
         for i in range(len(keys)):
@@ -39,7 +38,6 @@ class NSGA2Selector:
         candidates = []
         for a, b, _ in raw:
             a_s, b_s = prices[a], prices[b]
-            if len(a_s) < max(self.min_form_bars, 30): continue
             beta = estimate_beta_ols(a_s, b_s, use_log_price=self.use_log_price)
             candidates.append((a, b, beta))
         if not candidates:
@@ -63,7 +61,7 @@ class NSGA2Selector:
             s1, dd = bollinger_spread_score(
                 np.log(a_s) if self.use_log_price else a_s,
                 np.log(b_s) if self.use_log_price else b_s,
-                beta, self.bb_window, self.takeprofit_z, self.close_to_sma, self.fee_bps
+                beta, self.bb_window, self.takeprofit_z, self.fee_bps
             )
             if not np.isfinite(s1): s1 = -1e6
             if not np.isfinite(dd): dd = 1e6
@@ -107,7 +105,8 @@ class NSGA2Selector:
             return fronts
 
         def crowding_distance(front, pop_objs):
-            if not front: return []
+            if not front:
+                return []
             distances = [0.0 for _ in front]
             for m in range(2):
                 vals = [pop_objs[i][m] for i in front]
@@ -138,7 +137,8 @@ class NSGA2Selector:
             return new_pop
 
         def repair(ch):
-            used = set(); out = []
+            used = set()
+            out = []
             for idx in ch:
                 a, b, _ = candidates[idx]
                 if a in used or b in used: continue
@@ -160,7 +160,8 @@ class NSGA2Selector:
             return repair(c1), repair(c2)
 
         def mutate(ch):
-            if random.random() > 0.2: return ch
+            if random.random() > 0.2:
+                return ch
             used_assets = set()
             for idx in ch:
                 a, b, _ = candidates[idx]
@@ -194,6 +195,7 @@ class NSGA2Selector:
         # 从第一前沿选收益最高
         def fast_nondominated_sort_indices(population):
             return fast_nondominated_sort(pop_objs)
+
         fronts = fast_nondominated_sort(pop_objs)
         f0 = fronts[0] if fronts else list(range(len(pop_objs)))
         best_idx = max(f0, key=lambda i: pop_objs[i][0])
