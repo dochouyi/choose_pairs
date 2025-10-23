@@ -7,8 +7,6 @@ import numpy as np
 
 Pair = Tuple[str, str, float]
 
-
-
 class SDRSelector:
     def __init__(self, **kwargs):
         self.select_pairs_per_window: int = 3   #最多的候选数量,返回的总数量不超过这个值
